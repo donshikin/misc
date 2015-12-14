@@ -1,0 +1,202 @@
+---
+title: "Visual exploration for data science course"
+author: "Alex Ishkin"
+date: "Saturday, December 12, 2015"
+output: html_document
+---
+
+The goal of this study is to explore crime patterns in San Francisco and Seattle using visual means. All graphs below are produced using `ggplot2` package in R.
+
+My point of interest was: how are different crime types distributed spatially, across city's districts and neighborhoods. Are there district especially rich in thefts? Burglaries? Something else?
+
+I decided to calculate relative frequencies of crime in each neighborhood. For instance, if thefts constitute 20% of offenses across the city, but 40% of crimes in the downtown, this 2-fold frequency jump is certainly interesting thing.
+
+The overall conclusions are:
+
+* The biggest problem for both cities appears to be theft in different forms (they are encoded in the data sets differently, but the pattern is clear). There are no areas with drastically elevated frequency of thefts.
+* Some of offence types (e.g. prostitution) appear to be largely concentrated in one district; moreover, are limited to certain neighborhoods. This is the case for both cities.
+
+The relative frequencies for all offences with at least 100 cases are calculated as log ratios and visualized as heatmaps (offense vs. district) below. Offenses are sorted by number of total cases.
+
+```{r load, echo = FALSE, message = FALSE}
+require(reshape2)
+require(ggplot2)
+require(grid)
+
+##Load and munge data
+setwd('C:/Work/personal/education/datascience/datasci_course_materials/assignment6/')
+sea <- read.csv('seattle_incidents_summer_2014.csv')
+sf <- read.csv('sanfrancisco_incidents_summer_2014.csv')
+##Clean up a little bit (remove non-offenses)
+sf <- subset(sf, Category != 'NON-CRIMINAL')
+```
+
+As we can see, top crime (theft) in San Francisco doesn't have regional preference. Surprisingly, the prostitution is heavily localized in Central district (there are few other curious spots, but I do not analyze them in detail)
+
+```{r sf_heat, echo = FALSE, fig.width = 10, fig.height = 4}
+sf_nei_count <- dcast(sf, Category ~ PdDistrict, value.var = 'IncidntNum', fun = length)
+capwords <- function(s, strict = FALSE) {
+    paste(toupper(substring(s, 1, 1)), tolower(substring(s, 2)), sep = "")
+}
+sf_nei_count[,1] <- capwords(sf_nei_count[,1])
+colnames(sf_nei_count) <- capwords(colnames(sf_nei_count))
+
+##Count overall
+
+sf_nei_freq <- t(apply(sf_nei_count[,-1],1, function(x){x/sum(x)}))
+rownames(sf_nei_freq) <- sf_nei_count$Category
+
+##Filter out caegories with < 100 offenses
+idx <- apply(sf_nei_count[,-1],1, sum) >= 100
+sf_nei_count <- sf_nei_count[idx,]
+sf_nei_freq <- sf_nei_freq[idx,]
+sf_freq_overall <- colSums(sf_nei_count[,-1])
+sf_freq_overall <- sf_freq_overall / sum(sf_freq_overall)
+sf_rel_freq <- log2(t(apply(sf_nei_freq, 1, `/`, sf_freq_overall)))
+#Replace all negative values and NAs with 0's
+sf_rel_freq[sf_rel_freq < 0] <- 0
+sf_rel_freq[is.na(sf_rel_freq)] <- 0
+sf_rel_freq_long <- melt(sf_rel_freq)
+colnames(sf_rel_freq_long) <- c('Offense', 'District', 'LogRatio')
+
+sf_counts <- data.frame(area=sf_nei_count[,1], total = rowSums(sf_nei_count[,-1]))
+sf_order <- as.character(sf_counts$area[order(sf_counts$total, decreasing  = FALSE)])
+sf_rel_freq_long$Offense <- factor(as.character(sf_rel_freq_long$Offense), levels = sf_order)
+sf_counts$area <- factor(sf_counts$area, levels = sf_order)
+
+# ggplot(subset(sf_rel_freq_long, Var2 == 'SOUTHERN'), aes(x = Var1, y = value)) + geom_bar(stat='identity') + coord_flip()
+p1 <- ggplot(sf_rel_freq_long, aes(x=Offense, y=District)) + geom_tile(aes(fill = LogRatio), colour='white') + scale_fill_gradient(low = 'white', high = 'red') + coord_flip() + theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1)) + theme(legend.position='left') + ggtitle("Most frequent offences in districts of San Francisco")
+
+
+p2 <- ggplot(sf_counts, aes(x=area, y = total)) + geom_bar(stat='identity') + theme_bw() + geom_text(aes(label = total), hjust=0, size=2) + coord_flip() + ylim(c(0, 12000)) + ggtitle('Total offenses') + theme(axis.line=element_blank(), axis.text=element_blank(), axis.title=element_blank(), line=element_blank(), panel.border = element_blank())
+
+##Align!
+heat.g <- ggplot_gtable(ggplot_build(p1))
+bar.g <- ggplot_gtable(ggplot_build(p2))
+
+maxWidth = grid::unit.pmax(heat.g$heights[3:4], bar.g$heights[3:4])
+heat.g$heights[3:4] <- as.list(maxWidth)
+bar.g$heights[3:4] <- as.list(maxWidth)
+bar.ge <- subset(bar.g$layout, name %in% c("panel"))
+
+heat.v <- viewport(width = 0.7, height = 1, x=0.35, y = 0.5)
+bar.v <- viewport(width = 0.3, height = 1, x=.85, y = 0.5)
+grid.newpage()
+pushViewport(heat.v)
+grid.draw(heat.g)
+upViewport(n=1)
+pushViewport(bar.v)
+grid.draw(bar.g)
+# grid.draw(bar.g[bar.ge$t:bar.ge$b,])
+upViewport(n=1)
+```
+
+Seattle shows pretty much the same pattern, with top crime not showing preferences and a couple of bright spots including high frequency prostitution in area N. The area 99 is also curious, with a lot of hot spots on it.
+
+```{r sea_heat, echo = FALSE, fig.width = 10, fig.height = 4}
+sea <- subset(sea, District.Sector != '')
+sea_nei_count <- dcast(sea, Summarized.Offense.Description ~ District.Sector, value.var = 'RMS.CDW.ID', fun = length)
+sea_nei_count[,1] <- capwords(sea_nei_count[,1])
+colnames(sea_nei_count) <- capwords(colnames(sea_nei_count))
+
+##Count overall
+
+sea_nei_freq <- t(apply(sea_nei_count[,-1],1, function(x){x/sum(x)}))
+rownames(sea_nei_freq) <- sea_nei_count$Summarized.offense.description
+
+##Filter out caegories with < 100 offenses
+idx <- apply(sea_nei_count[,-1],1, sum) >= 100
+sea_nei_count <- sea_nei_count[idx,]
+sea_nei_freq <- sea_nei_freq[idx,]
+sea_freq_overall <- colSums(sea_nei_count[,-1])
+sea_freq_overall <- sea_freq_overall / sum(sea_freq_overall)
+sea_rel_freq <- log2(t(apply(sea_nei_freq, 1, `/`, sea_freq_overall)))
+#Replace all negative values and NAs with 0's
+sea_rel_freq[sea_rel_freq < 0] <- 0
+sea_rel_freq[is.na(sea_rel_freq)] <- 0
+sea_rel_freq_long <- melt(sea_rel_freq)
+colnames(sea_rel_freq_long) <- c('Offense', 'District', 'LogRatio')
+
+sea_counts <- data.frame(area=sea_nei_count[,1], total = rowSums(sea_nei_count[,-1]))
+sea_order <- as.character(sea_counts$area[order(sea_counts$total, decreasing  = FALSE)])
+sea_rel_freq_long$Offense <- factor(as.character(sea_rel_freq_long$Offense), levels = sea_order)
+sea_counts$area <- factor(sea_counts$area, levels = sea_order)
+
+# ggplot(subset(sea_rel_freq_long, Var2 == 'SOUTHERN'), aes(x = Var1, y = value)) + geom_bar(stat='identity') + coord_flip()
+p1 <- ggplot(sea_rel_freq_long, aes(x=Offense, y=District)) + geom_tile(aes(fill = LogRatio), colour='white') + scale_fill_gradient(low = 'white', high = '#002244') + coord_flip() + theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1)) + theme(legend.position='left') + ggtitle("Most frequent offences in districts of Seattle")
+
+
+p2 <- ggplot(sea_counts, aes(x=area, y = total)) + geom_bar(stat='identity') + theme_bw() + geom_text(aes(label = total), hjust=0, size=2) + coord_flip() + ylim(c(0, 12000)) + ggtitle('Total offenses') + theme(axis.line=element_blank(), axis.text=element_blank(), axis.title=element_blank(), line=element_blank(), panel.border = element_blank())
+
+##Align!
+heat.g <- ggplot_gtable(ggplot_build(p1))
+bar.g <- ggplot_gtable(ggplot_build(p2))
+
+maxWidth = grid::unit.pmax(heat.g$heights[3:4], bar.g$heights[3:4])
+heat.g$heights[3:4] <- as.list(maxWidth)
+bar.g$heights[3:4] <- as.list(maxWidth)
+bar.ge <- subset(bar.g$layout, name %in% c("panel"))
+
+heat.v <- viewport(width = 0.7, height = 1, x=0.35, y = 0.5)
+bar.v <- viewport(width = 0.3, height = 1, x=.85, y = 0.5)
+grid.newpage()
+pushViewport(heat.v)
+grid.draw(heat.g)
+upViewport(n=1)
+pushViewport(bar.v)
+grid.draw(bar.g)
+# grid.draw(bar.g[bar.ge$t:bar.ge$b,])
+upViewport(n=1)
+```
+
+Next, the spatial patterns can be explored in more detail using coordinates of events. As the following plot shows irtually all of Seattle prostitution cases are localized along one street, north of the downtown.
+
+```{r prostituion_quasi_map, echo = FALSE}
+prodf <- subset(sea, Latitude > 0, select = c('Summarized.Offense.Description', 'Longitude', 'Latitude'))
+colnames(prodf)[1] <- c('Offense')
+prodf$Offense <- capwords(as.character(prodf$Offense))
+prodf$highlight <- ifelse(prodf$Offense == 'Prostitution', 'Prostitution', 'Other')
+custom.colours <- c('Other' = '#CCCCCC33', 'Prostitution' = '#69BE2899')
+custom.sizes <- c('Other' = 1, 'Prostitution' = 4)
+p1 <- ggplot(prodf, aes(x=Longitude, y=Latitude)) + geom_point(aes(colour = highlight, size = highlight)) + scale_colour_manual(values = custom.colours) + scale_size_manual(values=custom.sizes) + theme_bw() + ggtitle("Prostitution in Seattle") + theme(panel.border=element_blank(), legend.position = 'none')
+print(p1)
+```
+
+In San Francisco, there appear to be two major foci of prostitution crime: one located in the midst of the downtown, and another one slightly to the south:
+
+```{r sf_pro_map, echo = FALSE}
+prodf <- subset(sf, select = c('Category', 'X', 'Y'))
+colnames(prodf) <- c('Offense', 'Longitude', 'Latitude')
+prodf$Offense <- capwords(as.character(prodf$Offense))
+prodf$highlight <- ifelse(prodf$Offense == 'Prostitution', 'Prostitution', 'Other')
+custom.colours <- c('Other' = '#CCCCCC33', 'Prostitution' = '#69BE2899')
+custom.sizes <- c('Other' = 1, 'Prostitution' = 4)
+p2 <- ggplot(prodf, aes(x=Longitude, y=Latitude)) + geom_point(aes(colour = highlight, size = highlight)) + scale_colour_manual(values = custom.colours) + scale_size_manual(values=custom.sizes) + theme_bw() + ggtitle("Prostitution in San Fransicso") + theme(panel.border=element_blank(), legend.position = 'none')
+print(p2)
+```
+
+The theft, a top offence category in both cities, is prevalent across the board, without any area drastically standing out. The following image shows theft cases in San Francisco. The downtown and Embarcadero areas appear to be theft-heavy, but these areas appear to be crime-prone overall.
+
+```{r sf_thefts_quasi_map, echo = FALSE}
+prodf <- subset(sf, select = c('Category', 'X', 'Y'))
+colnames(prodf) <- c('Offense', 'Longitude', 'Latitude')
+prodf$Offense <- capwords(as.character(prodf$Offense))
+prodf$highlight <- ifelse(prodf$Offense == 'Larceny/theft', 'Larceny/theft', 'Other')
+custom.colours <- c('Other' = '#CCCCCC33', 'Larceny/theft' = '#AF1E2C33')
+custom.sizes <- c('Other' = 1, 'Larceny/theft' = 2)
+p2 <- ggplot(prodf, aes(x=Longitude, y=Latitude)) + geom_point(aes(colour = highlight, size = highlight)) + scale_colour_manual(values = custom.colours) + scale_size_manual(values=custom.sizes) + theme_bw() + ggtitle("Theft in San Fransicso") + theme(panel.border=element_blank(), legend.position = 'none')
+print(p2)
+```
+
+Seattle appears to be even more theft-egalitarian. One should interpret this image with caution, as the Seattle's map only includes car prowls, with other theft offences being separated in other categories such as 'Bike theft' or 'Pickpocket'.
+
+```{r sea_theft_quasi_map, echo = FALSE}
+prodf <- subset(sea, Latitude > 0, select = c('Summarized.Offense.Description', 'Longitude', 'Latitude'))
+colnames(prodf)[1] <- c('Offense')
+prodf$Offense <- capwords(as.character(prodf$Offense))
+prodf$highlight <- ifelse(prodf$Offense == 'Car prowl', 'Car prowl', 'Other')
+custom.colours <- c('Other' = '#CCCCCC33', 'Car prowl' = '#AF1E2C33')
+custom.sizes <- c('Other' = 1, 'Car prowl' = 2)
+p1 <- ggplot(prodf, aes(x=Longitude, y=Latitude)) + geom_point(aes(colour = highlight, size = highlight)) + scale_colour_manual(values = custom.colours) + scale_size_manual(values=custom.sizes) + theme_bw() + ggtitle("Theft (car prowl) in Seattle") + theme(panel.border=element_blank(), legend.position = 'none')
+print(p1)
+```
