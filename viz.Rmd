@@ -2,7 +2,7 @@
 title: "Visual exploration for data science course"
 author: "Alex Ishkin"
 date: "Saturday, December 12, 2015"
-output: html_document
+output: pdf_document
 ---
 
 The goal of this study is to explore crime patterns in San Francisco and Seattle using visual means. All graphs below are produced using `ggplot2` package in R.
